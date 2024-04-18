@@ -1,0 +1,301 @@
+---
+title: "Analysis of Single Cell RNASeq Data by Nadeu et al. for Boolean network validation"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+
+```{r 'requirements'}
+library(Seurat)
+library(SeuratObject)
+library(reshape2)
+library(ggplot2)
+library(tidyverse)
+library(harmony)
+```
+
+```{r 'loading data'}
+#download seurat files from here: https://doi.org/10.5281/zenodo.6631966
+#get annotated data 
+fils <- list.files(path = "./Nadeu2022_NatMed_scRNAseq_data/seurat_objects/", pattern = "*annotated*",full.names = T)
+
+seuratData <- lapply(fils, readRDS)
+names(seuratData) <- c("12","19","3299", "365")
+
+#3299 -> no richter -> excluded
+seuratData <- seuratData[-3]
+```
+
+# Binarize dataset
+
+The given dataset will be binarized for better comparison with Boolean network prediction. This will be done on all genes with overlap to the Boolean network setup and marker genes to divide richter and CLL cells.
+For binarization the BASCA algorithm from the BiTrinA R-package was used. Binarization was computed in parallel. The results for further analysis are stored in "binarizedNadeu.RData"
+
+```{r eval=FALSE, include=FALSE}
+
+genesToBin <- c("CD5", "SET", "BMI1", "CITED2", "NOTCH1", "NOTCH2", "NOTCH3", "NOTCH4", "S100A4", "PTEN", "NFATC1", "NFATC2", "TP53", "MYC", "CDKN1A", "CDKN2A", "CDKN2B", "CDKN1B", "CCNE1", "CCNE2", "CCND1", "CCND2", "CCND3","PAX5","FCER2", "BCL2","AKT1")
+
+dat <- lapply(seuratData, function(dat) as.data.frame(dat[genesToBin, ]@assays$RNA$data))
+lapply(dat, \(d) rownames(d[rowSums(d) != 0,]))
+
+#data preparison for binarization on compute node
+save(dat, file="./toBinarizeRevised.RData")
+
+
+```
+
+
+```{r 'binarization task for cluster', eval=FALSE, echo=TRUE}
+#code to be executed for binarization in parallel on compute node
+load("./toBinarizeRevised.RData")
+binarizedRevised <- lapply(dat, function(d) {
+  cl <- makeCluster(45)
+  registerDoParallel(cl)    
+
+  l <- nrow(d)
+  binarizedBASCA <- foreach(i=1:l) %dopar%
+  {
+    return(BiTrinA::binarizeMatrix(d[i,], method = "BASCA", adjustment = "bonferroni"))
+  }
+
+  stopCluster(cl)
+  return(binarizedBASCA)
+})
+
+save(binarizedDat, file="binarizedDataset.RData")
+```
+
+# Comparison of scRNA data to Boolean network prediction
+
+After binarization, as preprocessing, only the genes with significant binarization threshold were chosen (see BiTrinA publication by Müssel et al., 2016).
+Simulated attractors which define the dynamics of the Boolean network under certain Richter conditions and CLL are loaded and then compared to scRNA data.
+Richter and CLL cells in the dataset were identified via given marker set of cyclines.
+
+```{r}
+load("binarizedDataset.RData")
+donors <- lapply(binarizedData, function(p) Reduce("rbind", p))
+donors <- lapply(donors, function(d) d[d$p.value < 0.05,])
+donors <- lapply(donors, function(p) p[,1:(ncol(p) - 2)])
+
+load("Attrgene_plus_EnsID.Rdata")
+load("RS_AKT_KI_attrmatrix.Rdata")
+load("RS_CDKN2AB_TP53_KO_attrmatrix.Rdata")
+load("RS_NFAT_KO_attrmatrix.Rdata")
+load("RS_NOTCH_KI_attrmatrix.Rdata")
+load("CLL_attrmatrix.Rdata")
+colnames(Attrgene_plus_Ensembl) <- c("name_im_att", "ensembl_gene_id", "hgnc_symbol")
+attractors <- list(aktki= RS_AKT_KI_attrmatrix, tp53ko = RS_CDKN2AB_TP53_KO_attrmatrix, nfatko = RS_NFAT_KO_attrmatrix, notchki = RS_NOTCH_KI_attrmatrix, cll= CLL_attrmatrix)
+
+
+
+geneMarkers <- c("SYK", "PIK3CA", "AKT1", "CD5", "PTPN6", "LYN", "PTEN", "NFATC1", "MAPK1", "S100A4", "MYC", "CDKN1A", "CDKN2B")
+genesCompare <- Attrgene_plus_Ensembl$name_im_att[Attrgene_plus_Ensembl$hgnc_symbol %in% geneMarkers]
+
+#for mapping of gene names cut of the final 4 genes which are markers not present in the network
+mapping <- data.frame(data = rownames(donors[["12"]])[1:23], network = c("CD5","SET","BMI1","CITED2", "NOTCH1", "NOTCH1", "NOTCH1", "NOTCH1", "S100a4", "PTEN","NFAT","NFAT","p53","cmyc","p21","p16","p15","p27","CyclinE","CyclinE","CyclinD","CyclinD","CyclinD"))
+
+binTab <- donors
+
+#Classify cells according to marker sets
+markerGenes <- c("CCNE1", "CCNE2", "CCND1", "CCND2", "CCND3")
+markerSet <- c(1,1,1,1,1)
+
+classifiedPop <- lapply(binTab, \(d) apply(d[markerGenes,], MARGIN = 2, \(x) any(x == markerSet)))
+richterPopulation <- mapply(\(tab, pop) tab[,pop], binTab, classifiedPop)
+
+#merge donors, cut NOTCH3 as could not be binarized for donor 365
+richterPopulation <- lapply(richterPopulation, \(don) don[!grepl( "NOTCH3", rownames(don)),])
+unitedRichterDonors <- Reduce("cbind", richterPopulation[2:3],init = richterPopulation[[1]])
+#sum over richter cells
+freqInRichterPopulation <- rowSums(unitedRichterDonors)/ncol(unitedRichterDonors)
+freqInRichterPopulation <- cbind("active" = freqInRichterPopulation, "inactive" = 1-freqInRichterPopulation)
+freqInRichterPopulation <- freqInRichterPopulation[markerGenes[!grepl("NOTCH3", markerGenes)],]
+freqInRichterAttractors <- Reduce("+",attractors[!grepl("cll",names(attractors))])/length(attractors[!grepl("cll",names(attractors))])
+freqInRichterAttractors <- cbind("active" = t(t(freqInRichterAttractors)), "inactive" = 1-freqInRichterAttractors)
+colnames(freqInRichterAttractors) <- c("active", "inactive")
+#rename genes
+freqInRichterAttractors <- freqInRichterAttractors[genesCompare,]
+rownames(freqInRichterAttractors) <- geneMarkers
+freqInRichterAttractors <- freqInRichterAttractors[!grepl("NOTCH3", rownames(freqInRichterAttractors)),]
+
+frequencyTab <- melt(list(data = freqInRichterPopulation, attractors = freqInRichterAttractors))
+colnames(frequencyTab) <- c("Gene", "State", "Frequency", "Source")
+
+frequencyTab <- frequencyTab[frequencyTab$State == "active",]
+frequencyTab$Frequency <- round(frequencyTab$Frequency, 3)
+frequencyTab <- frequencyTab %>% group_by(Gene) %>% mutate(Match=ifelse(all(Frequency >= 0.3) | all(Frequency < 0.3),1,0.9)) %>% ungroup()
+pdf("output/barplotPopulationFrequencyHScore.pdf", paper = "a4r")
+ggplot(frequencyTab, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position="dodge", stat="identity",width=.6) + theme_classic() + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1)) + geom_hline(yintercept = 0.30, color = "#BF0000", linewidth = 1, linetype=2) + scale_y_continuous(name="Frequency of cells with active gene in population", breaks=c(0,0.25,0.3,0.5,0.75,1)) + scale_fill_manual(values=c("#F1A340","#998EC3"))
+dev.off()
+
+```
+
+```{r 'UMAP Plots'}
+
+#use harmony algorithm to remove badge effects between data of differnt donors
+harmonizedSeurat <- merge(seuratData[[1]], y = seuratData[2:3]) %>% NormalizeData() %>% ScaleData() %>% RunPCA(features=rownames(.@assays$RNA)) %>% RunHarmony(group.by.vars="donor_id", reduction.save="harmony.rna")
+
+harmonizedSeurat@meta.data$binary.class <- Reduce("c", classifiedPop)
+
+harmonizedSeurat <- RunUMAP(harmonizedSeurat, assay = "RNA", dims=1:11, reduction="harmony.rna",reduction.name = "umap.rna")
+
+pdf("output/harmonizedUMAP.pdf", paper = "a4r")
+DimPlot(harmonizedSeurat, group.by = "donor_id",reduction = "umap.rna")
+DimPlot(harmonizedSeurat, group.by = "binary.class",reduction = "umap.rna")
+dev.off()
+
+binarizedMatrix <- Reduce("cbind", lapply(binTab, \(don) don[!grepl( "NOTCH3", rownames(don)),]))
+
+#add binarized matrix as additional assay to seurat object for plotting
+harmonizedSeurat@assays$BIN <- harmonizedSeurat@assays$RNA
+harmonizedSeurat@assays$BIN@data <- as.matrix(binarizedMatrix)
+harmonizedSeurat@assays$BIN@scale.data <- as.matrix(binarizedMatrix)
+harmonizedSeurat@assays$BIN@counts <- as.matrix(binarizedMatrix)
+
+pdf("output/harmonizedUMAPNotch.pdf", paper = "a4r")
+FeaturePlot(harmonizedSeurat, features = c("NOTCH1","NOTCH2","NOTCH3", "NOTCH4"),reduction = "umap.rna")
+dev.off()
+
+DefaultAssay(harmonizedSeurat) <- "BIN"
+pdf("output/harmonizedUMAPNotchBinarized.pdf", paper = "a4r")
+FeaturePlot(harmonizedSeurat, features = c("NOTCH1","NOTCH2", "NOTCH4"),reduction = "umap.rna")
+dev.off()
+
+pdf("output/harmonizedUMAPNotch1Binarized.pdf", paper = "a4r")
+FeaturePlot(harmonizedSeurat, features = c("NOTCH1"),reduction = "umap.rna")
+dev.off()
+
+pdf("output/harmonizedUMAPP53Binarized.pdf", paper = "a4r")
+FeaturePlot(harmonizedSeurat, features = c("TP53"),reduction = "umap.rna")
+dev.off()
+
+pdf("output/harmonizedUMAPISRichter.pdf", paper = "a4r")
+FeaturePlot(harmonizedSeurat, features = c("is_richter"),reduction = "umap.rna")
+dev.off()
+
+```
+
+
+```{r 'Population Perspective with Notch'}
+
+markerGenes <- c("CCNE1", "CCNE2", "CCND1", "CCND2", "CCND3", "NOTCH1")
+markerSet <- c(1,1,1,1,1,1)
+
+classifiedPopNotch <- lapply(binTab, \(d) apply(d[markerGenes,], MARGIN = 2, \(x) any(x[grepl(pattern="CCN", markerGenes)] == markerSet[grepl(pattern="CCN", markerGenes)]) & x[grepl(pattern="NOTCH",markerGenes)] == markerSet[grepl(pattern="NOTCH", markerGenes)]))
+richterPopulation <- mapply(\(tab, pop) tab[,pop], binTab, classifiedPopNotch)
+
+#merge donors, cut NOTCH3 as could not be binarized for donor 365
+richterPopulation <- lapply(richterPopulation, \(don) don[!grepl( "NOTCH3", rownames(don)),])
+unitedRichterDonors <- Reduce("cbind", richterPopulation[2:3],init = richterPopulation[[1]])
+#sum over richter cells
+freqInRichterPopulation <- rowSums(unitedRichterDonors)/ncol(unitedRichterDonors)
+freqInRichterPopulation <- cbind("active" = freqInRichterPopulation, "inactive" = 1-freqInRichterPopulation)
+freqInRichterPopulation <- freqInRichterPopulation[geneMarkers[!grepl("NOTCH3", geneMarkers)],]
+freqInRichterAttractors <- Reduce("+",attractors[!grepl("cll",names(attractors))])/length(attractors[!grepl("cll",names(attractors))])
+freqInRichterAttractors <- cbind("active" = t(t(freqInRichterAttractors)), "inactive" = 1-freqInRichterAttractors)
+colnames(freqInRichterAttractors) <- c("active", "inactive")
+#rename genes
+freqInRichterAttractors <- freqInRichterAttractors[genesCompare,]
+rownames(freqInRichterAttractors) <- geneMarkers
+freqInRichterAttractors <- freqInRichterAttractors[!grepl("NOTCH3", rownames(freqInRichterAttractors)),]
+
+frequencyTab <- melt(list(data = freqInRichterPopulation, attractors = freqInRichterAttractors))
+colnames(frequencyTab) <- c("Gene", "State", "Frequency", "Source")
+#frequencyTab <- frequencyTab %>% mutate(GeneDat = factor(str_replace(interaction(Gene, Source), '\\.', ' / '),
+#                          ordered=TRUE))
+#select actives only
+frequencyTab <- frequencyTab[frequencyTab$State == "active",]
+frequencyTab$Frequency <- round(frequencyTab$Frequency, 3)
+frequencyTab <- frequencyTab %>% group_by(Gene) %>% mutate(Match=ifelse(all(Frequency >= 0.3) | all(Frequency < 0.3),1,0.9)) %>% ungroup()
+frequencyTabNOTCHON <- frequencyTab
+pdf("output/barplotPopulationFrequencyHScoreNotch.pdf", paper = "a4r")
+ggplot(frequencyTab, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position="dodge", stat="identity",width=.6) + theme_classic() + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1)) + geom_hline(yintercept = 0.30, color = "#BF0000", linewidth = 1, linetype=2) + scale_y_continuous(name="Frequency of cells with active gene in population", breaks=c(0,0.25,0.3,0.5,0.75,1)) + scale_fill_manual(values=c("#F1A340","#998EC3"))
+dev.off()
+
+#####NOTCH1 off:
+
+markerGenes <- c("CCNE1", "CCNE2", "CCND1", "CCND2", "CCND3", "NOTCH1")
+markerSet <- c(1,1,1,1,1,0)
+
+classifiedPopNotch <- lapply(binTab, \(d) apply(d[markerGenes,], MARGIN = 2, \(x) any(x[grepl(pattern="CCN", markerGenes)] == markerSet[grepl(pattern="CCN", markerGenes)]) & x[grepl(pattern="NOTCH",markerGenes)] == markerSet[grepl(pattern="NOTCH", markerGenes)]))
+richterPopulation <- mapply(\(tab, pop) tab[,pop], binTab, classifiedPopNotch)
+
+#merge donors, cut NOTCH3 as could not be binarized for donor 365
+richterPopulation <- lapply(richterPopulation, \(don) don[!grepl( "NOTCH3", rownames(don)),])
+unitedRichterDonors <- Reduce("cbind", richterPopulation[2:3],init = richterPopulation[[1]])
+#sum over richter cells
+freqInRichterPopulation <- rowSums(unitedRichterDonors)/ncol(unitedRichterDonors)
+freqInRichterPopulation <- cbind("active" = freqInRichterPopulation, "inactive" = 1-freqInRichterPopulation)
+freqInRichterPopulation <- freqInRichterPopulation[geneMarkers[!grepl("NOTCH3", geneMarkers)],]
+freqInRichterAttractors <- Reduce("+",attractors[!grepl("cll",names(attractors))])/length(attractors[!grepl("cll",names(attractors))])
+freqInRichterAttractors <- cbind("active" = t(t(freqInRichterAttractors)), "inactive" = 1-freqInRichterAttractors)
+colnames(freqInRichterAttractors) <- c("active", "inactive")
+#rename genes
+freqInRichterAttractors <- freqInRichterAttractors[genesCompare,]
+rownames(freqInRichterAttractors) <- geneMarkers
+freqInRichterAttractors <- freqInRichterAttractors[!grepl("NOTCH3", rownames(freqInRichterAttractors)),]
+
+frequencyTab <- melt(list(data = freqInRichterPopulation, attractors = freqInRichterAttractors))
+colnames(frequencyTab) <- c("Gene", "State", "Frequency", "Source")
+
+#select actives only
+frequencyTab <- frequencyTab[frequencyTab$State == "active",]
+frequencyTab$Frequency <- round(frequencyTab$Frequency, 3)
+frequencyTab <- frequencyTab %>% group_by(Gene) %>% mutate(Match=ifelse(all(Frequency >= 0.3) | all(Frequency < 0.3),1,0.9)) %>% ungroup()
+frequencyTabNOTCHOFF <- frequencyTab
+pdf("output/barplotPopulationFrequencyHScoreNotchOFF.pdf", paper = "a4r")
+ggplot(frequencyTab, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position="dodge", stat="identity",width=.6) + theme_classic() + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1)) + geom_hline(yintercept = 0.30, color = "#BF0000", linewidth = 1, linetype=2) + scale_y_continuous(name="Frequency of cells with active gene in population", breaks=c(0,0.25,0.3,0.5,0.75,1)) + scale_fill_manual(values=c("#F1A340","#998EC3"))
+dev.off()
+
+save(frequencyTabNOTCHON,frequencyTabNOTHOFF, file = "./output/frequencyTablesNOTCH.RData")
+```
+
+```{r 'Population perspective per Donor'}
+
+markerGenes <- c("CCNE1", "CCNE2", "CCND1", "CCND2", "CCND3")
+markerSet <- c(1,1,1,1,1)
+
+classifiedPop <- lapply(binTab, \(d) apply(d[markerGenes,], MARGIN = 2, \(x) any(x == markerSet)))
+richterPopulation <- mapply(\(tab, pop) tab[,pop], binTab, classifiedPop)
+
+#merge donors, cut NOTCH3 as could not be binarized for donor 365
+richterPopulation <- lapply(richterPopulation, \(don) don[!grepl( "NOTCH3", rownames(don)),])
+
+#sum over richter cells
+freqInRichterPopulation <- lapply(richterPopulation, \(don) rowSums(don)/ncol(don))
+freqInRichterPopulation <- lapply(freqInRichterPopulation, \(don) cbind("active" = don, "inactive" = 1-don))
+freqInRichterPopulation <- lapply(freqInRichterPopulation, \(don) don[geneMarkers[!grepl("NOTCH3", geneMarkers)],])
+freqInRichterAttractors <- Reduce("+",attractors[!grepl("cll",names(attractors))])/length(attractors[!grepl("cll",names(attractors))])
+freqInRichterAttractors <- cbind("active" = t(t(freqInRichterAttractors)), "inactive" = 1-freqInRichterAttractors)
+colnames(freqInRichterAttractors) <- c("active", "inactive")
+#rename genes
+freqInRichterAttractors <- freqInRichterAttractors[genesCompare,]
+rownames(freqInRichterAttractors) <- geneMarkers
+freqInRichterAttractors <- freqInRichterAttractors[!grepl("NOTCH3", rownames(freqInRichterAttractors)),]
+
+frequencyTab <- lapply(freqInRichterPopulation, \(don) {ret <- melt(list(data = don, attractors = freqInRichterAttractors))
+                                                        colnames(ret) <- c("Gene", "State", "Frequency", "Source")
+                                                        ret})
+
+
+#select actives only
+frequencyTab <- lapply(frequencyTab, \(don) {ret <- don[don$State == "active",]
+                                             ret$Frequency <- round(ret$Frequency, 3)
+                                             ret %>% group_by(Gene) %>% mutate(Match=ifelse(all(Frequency >= 0.3) | all(Frequency < 0.3),1,0.9)) %>% ungroup()})
+
+pdf("output/barplotPopulationFrequencyHScorePerDonor.pdf", paper = "a4r")
+lapply(frequencyTab, \(don) ggplot(don, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position="dodge", stat="identity",width=.6) + theme_classic() + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1)) + geom_hline(yintercept = 0.30, color = "#BF0000", linewidth = 1, linetype=2) + scale_y_continuous(name="Frequency of cells with active gene in population", breaks=c(0,0.25,0.3,0.5,0.75,1)) + scale_fill_manual(values=c("#F1A340","#998EC3")))
+dev.off()
+
+don <- frequencyTab[[1]]
+ggplot(don, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position = "dodge", stat="identity")
+
+
+pdf("output/barplotPopulationFrequencyInactive.pdf", paper = "a4r")
+ggplot(frequencyTab[frequencyTab$State == "inactive",], aes(fill=Source, y = Frequency, x = Gene)) + geom_bar(position="dodge", stat="identity") + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1))
+dev.off()
+
+
+```
+
