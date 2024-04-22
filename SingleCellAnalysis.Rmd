@@ -89,11 +89,14 @@ attractors <- list(aktki= RS_AKT_KI_attrmatrix, tp53ko = RS_CDKN2AB_TP53_KO_attr
 
 
 
-geneMarkers <- c("SYK", "PIK3CA", "AKT1", "CD5", "PTPN6", "LYN", "PTEN", "NFATC1", "MAPK1", "S100A4", "MYC", "CDKN1A", "CDKN2B")
-genesCompare <- Attrgene_plus_Ensembl$name_im_att[Attrgene_plus_Ensembl$hgnc_symbol %in% geneMarkers]
+#geneMarkers <- c("SYK", "PIK3CA", "AKT1", "CD5", "PTPN6", "LYN", "PTEN", "NFATC1", "MAPK1", "S100A4", "MYC", "CDKN1A", "CDKN2B")
+#genesCompare <- Attrgene_plus_Ensembl$name_im_att[Attrgene_plus_Ensembl$hgnc_symbol %in% geneMarkers]
 
 #for mapping of gene names cut of the final 4 genes which are markers not present in the network
 mapping <- data.frame(data = rownames(donors[["12"]])[1:23], network = c("CD5","SET","BMI1","CITED2", "NOTCH1", "NOTCH1", "NOTCH1", "NOTCH1", "S100a4", "PTEN","NFAT","NFAT","p53","cmyc","p21","p16","p15","p27","CyclinE","CyclinE","CyclinD","CyclinD","CyclinD"))
+
+genesCompare <- mapping$network
+geneMarkers <- mapping$data
 
 binTab <- donors
 
@@ -110,7 +113,7 @@ unitedRichterDonors <- Reduce("cbind", richterPopulation[2:3],init = richterPopu
 #sum over richter cells
 freqInRichterPopulation <- rowSums(unitedRichterDonors)/ncol(unitedRichterDonors)
 freqInRichterPopulation <- cbind("active" = freqInRichterPopulation, "inactive" = 1-freqInRichterPopulation)
-freqInRichterPopulation <- freqInRichterPopulation[markerGenes[!grepl("NOTCH3", markerGenes)],]
+freqInRichterPopulation <- freqInRichterPopulation[geneMarkers[!grepl("NOTCH3", geneMarkers)],]
 freqInRichterAttractors <- Reduce("+",attractors[!grepl("cll",names(attractors))])/length(attractors[!grepl("cll",names(attractors))])
 freqInRichterAttractors <- cbind("active" = t(t(freqInRichterAttractors)), "inactive" = 1-freqInRichterAttractors)
 colnames(freqInRichterAttractors) <- c("active", "inactive")
@@ -131,17 +134,23 @@ dev.off()
 
 ```
 
-```{r 'UMAP Plots'}
-
+```{r 'Merging different donors'}
 #use harmony algorithm to remove badge effects between data of differnt donors
 harmonizedSeurat <- merge(seuratData[[1]], y = seuratData[2:3]) %>% NormalizeData() %>% ScaleData() %>% RunPCA(features=rownames(.@assays$RNA)) %>% RunHarmony(group.by.vars="donor_id", reduction.save="harmony.rna")
 
 harmonizedSeurat@meta.data$binary.class <- Reduce("c", classifiedPop)
 
+```
+
+```{r 'UMAP Plots'}
+
+
 harmonizedSeurat <- RunUMAP(harmonizedSeurat, assay = "RNA", dims=1:11, reduction="harmony.rna",reduction.name = "umap.rna")
 
-pdf("output/harmonizedUMAP.pdf", paper = "a4r")
+pdf("output/harmonizedUMAPByDonor.pdf", paper = "a4r")
 DimPlot(harmonizedSeurat, group.by = "donor_id",reduction = "umap.rna")
+dev.off()
+pdf("output/harmonizedUMAPByCycl.pdf", paper = "a4r")
 DimPlot(harmonizedSeurat, group.by = "binary.class",reduction = "umap.rna")
 dev.off()
 
@@ -153,6 +162,7 @@ harmonizedSeurat@assays$BIN@data <- as.matrix(binarizedMatrix)
 harmonizedSeurat@assays$BIN@scale.data <- as.matrix(binarizedMatrix)
 harmonizedSeurat@assays$BIN@counts <- as.matrix(binarizedMatrix)
 
+DefaultAssay(harmonizedSeurat) <- "RNA"
 pdf("output/harmonizedUMAPNotch.pdf", paper = "a4r")
 FeaturePlot(harmonizedSeurat, features = c("NOTCH1","NOTCH2","NOTCH3", "NOTCH4"),reduction = "umap.rna")
 dev.off()
@@ -290,11 +300,6 @@ dev.off()
 
 don <- frequencyTab[[1]]
 ggplot(don, aes(fill=Source, y = Frequency, x = Gene, alpha = Match)) + geom_bar(position = "dodge", stat="identity")
-
-
-pdf("output/barplotPopulationFrequencyInactive.pdf", paper = "a4r")
-ggplot(frequencyTab[frequencyTab$State == "inactive",], aes(fill=Source, y = Frequency, x = Gene)) + geom_bar(position="dodge", stat="identity") + theme(axis.text.x = element_text(angle = 50, vjust = 0.5, hjust=1))
-dev.off()
 
 
 ```
