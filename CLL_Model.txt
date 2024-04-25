@@ -1,0 +1,50 @@
+targets, factors
+BCR,  ((LYN & SYK) | ZAP70 | NOTCH1) | BCR
+SYK, BCR & (BCR | LYN)  & !NFAT  & !SHP1 
+BTK, BCR & ((SYK | LYN) | NOTCH1 | PI3K) & !SHP1
+PI3K, (LYN | SYK | ZAP70 | Ras) & !SHP1 & !PTEN
+AKT, (PKCbeta | PI3K) & (!LYN | (LYN & !NFAT)) & !PP2A
+PP2A, ! SET
+SET, (GSK3B | cmyc) & LYN
+FOXO, !AKT
+PLCG2, BTK & SYK  
+CD5, NFAT
+SHP1, LYN & CD5 
+LYN, BCR & (BCR | NOTCH1) 
+ZAP70, BCR
+PKCdelta,  (DAG | PI3K  | SYK | LYN) 
+PKCbeta, Ca | DAG | PI3K  | SYK | ZAP70
+PTEN, (SHP1 | PTEN | p53) & NFAT
+Ras, BCR & (PKCdelta | PKCbeta | DAG)
+p53, !MDM2  & !S100a4 
+MDM2, (AKT | p53) & !p14
+CTNNB1,	!SHP1 & !GSK3B
+GSK3B, !PKCbeta & !AKT 
+NFkB,  PKCbeta & (PKCbeta | NOTCH1 | PI3K | S100a4 | ERK)  & !SHP1 & !PKCdelta
+NFAT, (BCR | Stim1 | Ca) & !GSK3B & !NOTCH1 
+MCL1,  (PI3K | NOTCH1 | CD5) & !GSK3B & !p38MAPK
+Stim1,	Ca 
+ERK, Ras 
+Ca_ERK,	Stim1 & Ras 
+Ca, PLCG2
+DAG, PLCG2
+BIM, (FOXO | p53 | Ca_ERK) & !BCL2 & !MCL1 & !AKT & !PKCbeta 
+BCL2, (PKCbeta & ZAP70) | ERK | NFkB  
+NOTCH1, AKT | NFkB 
+S100a4, CTNNB1 & !NFAT 
+Anergy,	NFAT & !NFkB & !AKT & !Sphase
+Apoptosis, BIM & !AKT
+cmyc, (CTNNB1 | ERK | NOTCH1 | CITED2) & !GSK3B & !p53 
+BMI1,	(cmyc | CITED2) & (!p38MAPK | (AKT & p38MAPK)) 
+CITED2,	FOXO | cmyc
+p38MAPK, Ras 	
+p21, (p53 | (Ras & E2F))  & !cmyc 
+p16, Ras & !BMI1 
+p14, Ras & !BMI1 
+p15, Ras & !BMI1
+p27, FOXO & !SHP1 
+CyclinD,(NOTCH1 | NFkB | CTNNB1 | cmyc) & !p15 & !p16 & !p21 & !GSK3B
+CyclinE, E2F & ((!p21 & !p27)| CyclinD)  
+Rb, !CyclinD
+E2F, !p21 & !Rb 
+Sphase, CyclinE & E2F
