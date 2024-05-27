@@ -12,7 +12,7 @@ All additional file sources are provided in the repository and listed below:
 
 # Validation of CLL/Richter Boolean network using Single Cell RNA Seq data
 
-The network predictions were validated using a single cell RNA Seq dataset of human CLL patients by Nadeu et al., Nature Medicine, 2022. For the analysis, we used the publicly available Seurat-objects (https://zenodo.org/records/6631966). 
+The network predictions were validated using a single cell RNA Seq dataset of human CLL patients by Nadeu et al., Nature Medicine, 2022 (https://doi.org/10.1038/s41591-022-01927-8). For the analysis, we used the publicly available Seurat-objects (https://zenodo.org/records/6631966). 
 Code for the validation of the Boolean network prediction based on single cell RNA sequencing data can be found in the RMarkdown-file SingleCellAnalysis.Rmd.
 
 Additional files : 
