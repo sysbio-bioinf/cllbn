@@ -21,3 +21,26 @@ Additional files :
  - A mapping of network gene names to ENSEMBL-IDs can be found in Attrgene_plus_EnsID.Rdata
  - SingleCellAnalysis.nb.html is a compiled html-file showing the results as generated within  SingleCellAnalysis.Rmd
  - All figures showing the different results generated in the SingleCellAnalysis.Rmd file can be found in the folder "output"
+
+# System Info
+
+All main simulations were performed on a MacBook Pro with Apple Silicon Chip and OS-Version 14.3 (Sonoma). Binarization was run massively parallel on a compute node running with Ubuntu 20.04 LTS. 
+Besides binarization, the script can be ran within minutes. Depending on the avaiable resources binarization might take up to days. Consequently, the intermediary results are given withing the repository (binarizedDataset.RData).
+Simulations were run on R Version 4.2.2. 
+
+Required packages for simulation are : 
+- BoolNet, version 2.1.7
+- qgraph, version 1.9.3
+- igraph, version 1.3.5
+- pROC, version 1.18.0
+- ggplot2, version 3.4.1
+- ggpubr, version 0.6.0
+- poweRlaw, version 0.70.6
+- readr, version 2.1.5
+- viridis, version 0.6.4
+- tidyverse, version 2.0.0
+- Seurat, version 5.0.0
+- SeuratObject, version 5.0.0
+- reshape2, version 1.4.4
+- harmony, version 1.1.0
+- BiTriNa, version 1.3.1
