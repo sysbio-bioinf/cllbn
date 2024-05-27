@@ -24,8 +24,9 @@ Additional files :
 
 # System Info
 
-All main simulations were performed on a MacBook Pro with Apple Silicon Chip and OS-Version 14.3 (Sonoma). Binarization was run massively parallel on a compute node running with Ubuntu 20.04 LTS. 
-Besides binarization, the script can be ran within minutes. Depending on the avaiable resources binarization might take up to days. Consequently, the intermediary results are given withing the repository (binarizedDataset.RData).
+All main simulations were performed on a MacBook Pro with Apple Silicon Chip and OS-Version 14.3 (Sonoma). Binarization and input/output analysis were run massively parallel on a compute node running with Ubuntu 20.04 LTS. 
+Besides the latter two, the script can be ran within minutes. Depending on the avaiable resources binarization and input/output analysis might take up to days. Consequently, the intermediary results are given withing the repository (binarizedDataset.RData, CLL_IO-Notch_TP53.RData, InputOutputAnalysisHeatmap.RData).
+
 Simulations were run on R Version 4.2.2. 
 
 Required packages for simulation are : 
